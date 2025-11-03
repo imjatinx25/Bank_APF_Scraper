@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  bank-scraper-api:
+    build: .
+    container_name: bank-scraper-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Override these with your actual values or use .env file
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_KEY=${S3_KEY}
+      # AWS credentials (if not using IAM role)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-south-1}
+    volumes:
+      # Mount output directory to persist data
+      - ./output:/app/output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
