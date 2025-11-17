@@ -1,68 +1,75 @@
-#!/bin/bash
-set -e
+pipeline {
+    agent any
 
-echo "===== Config ====="
-AWS_REGION="ap-south-1"
-DOCKER_REGISTRY="676206929524.dkr.ecr.ap-south-1.amazonaws.com"
-DOCKER_IMAGE="dev-orbit-pem"
-DOCKER_TAG="${DOCKER_IMAGE}:${BUILD_NUMBER}"
+    triggers {
+        githubPush()  // Trigger build on GitHub push
+    }
 
-echo "Region: $AWS_REGION"
-echo "Registry: $DOCKER_REGISTRY"
-echo "Image: $DOCKER_IMAGE"
-echo "Tag: $DOCKER_TAG"
+    environment {
+        BRANCH_NAME = "${env.BRANCH_NAME}"  // Correctly quote the variable
+    }
 
-echo "===== Debug branch ====="
-git rev-parse --abbrev-ref HEAD || true
+    stages {
+        stage('Checkout') {
+            when {
+                branch 'main'  // Only trigger on main
+            }
+            steps {
+                checkout scm
+            }
+        }
 
-echo "===== Inject .env from Jenkins secret file (main only) ====="
-if [ -n "$ENV_FILE" ]; then
-  echo "Using ENV_FILE: $ENV_FILE"
-  cp "$ENV_FILE" .env
-  # Optional sanity check:
-  [ -s .env ] || { echo ".env missing or empty"; exit 1; }
-else
-  echo "ENV_FILE not set – skipping .env injection"
-fi
+        stage('Inject .env from Jenkins Secret File') {
+            when {
+                branch 'main'
+            }
+            steps {
+                withCredentials([file(credentialsId: 'apf_scrapping', variable: 'ENV_FILE')]) {
+                    sh 'cp $ENV_FILE .env'
+                }
+            }
+        }
 
-echo "===== Setup Python virtualenv & install deps ====="
-python3 -m venv venv
-# shellcheck source=/dev/null
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+        stage('Setup Python Env & Install Dependencies') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh '''
+                python3 -m venv venv
+                source venv/bin/activate
+                pip install --upgrade pip
+                pip install -r requirements.txt
+                '''
+            }
+        }
+    }
 
-echo "===== Login to AWS ECR ====="
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$DOCKER_REGISTRY"
-
-echo "===== Build Docker image ====="
-docker build -t "$DOCKER_TAG" .
-
-echo "===== Tag Docker image with registry path ====="
-docker tag "$DOCKER_TAG" "${DOCKER_REGISTRY}/${DOCKER_TAG}"
-
-echo "===== Push Docker image to ECR ====="
-docker push "${DOCKER_REGISTRY}/${DOCKER_TAG}"
-
-echo "===== Stop & remove old container on port 6000 ====="
-container_id=$(docker ps -q --filter "publish=6000")
-if [ -n "$container_id" ]; then
-  docker stop "$container_id"
-  docker rm "$container_id"
-  echo "Old container stopped and removed"
-else
-  echo "No container running on port 6000"
-fi
-
-echo "===== Run new container on port 6000 ====="
-aws ecr get-login-password --region "$AWS_REGION" \
-  | docker login --username AWS --password-stdin "$DOCKER_REGISTRY"
-
-docker run -d -p 6000:6000 \
-  --label app=pem-api \
-  -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
-  -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
-  "${DOCKER_REGISTRY}/${DOCKER_TAG}"
-
-echo "===== Done ====="
+    post {
+        success {
+            slackSend (
+            tokenCredentialId: 'slack_channel_secret',  // The ID of the bot token credential in Jenkins
+            message: "✅ Build SUCCESSFUL: ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+            channel: '#orbit',
+            channel: '#jenekin_update',
+            color: 'good',  // Optional: Green color for success
+            iconEmoji: ':white_check_mark:',  // Optional: Emoji
+            username: 'Jenkins'
+        )
+        }
+        failure {
+            slackSend (
+            tokenCredentialId: 'slack_channel_secret',
+            message: "❌ Build FAILED: ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+            channel: '#orbit',
+            channel: '#jenekin_update',
+            color: 'danger',  // Optional: Red color for failure
+            iconEmoji: ':x:',  // Optional: Emoji
+            username: 'Jenkins'
+        )
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
