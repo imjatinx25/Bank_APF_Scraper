@@ -29,7 +29,7 @@ WAIT_AFTER_CLICK_MS       = 900
 WAIT_AFTER_MODAL_READY_MS = 250
 EXPECT_POPUP_TIMEOUT_MS   = 4000
 MODAL_FIELD_TIMEOUT_MS    = 9000
-FINGERPRINT_TIMEOUT_MS    = 18000
+FINGERPRINT_TIMEOUT_MS    = 16000
 MAX_CLICK_RETRIES         = 3
 
 FIELDNAMES = [
@@ -295,7 +295,7 @@ def go_to_page_one(page: Page) -> bool:
 def ensure_grid_ready(page: Page) -> bool:
     """Robust guard after search/paging/closing popup. Soft-refresh if needed."""
     try:
-        wait_grid_visible(page, timeout=8000)
+        wait_grid_visible(page, timeout=6000)
         wait_rows_present(page, timeout=16000)
         return True
     except PWTimeout:
@@ -304,7 +304,7 @@ def ensure_grid_ready(page: Page) -> bool:
             page.click(BTN)
             sleep(page, WAIT_AFTER_SEARCH_MS)
             wait_for_results_or_empty(page, timeout=20000)
-            wait_grid_visible(page, timeout=8000)
+            wait_grid_visible(page, timeout=6000)
             wait_rows_present(page, timeout=16000)
             return True
         except Exception:
@@ -395,7 +395,7 @@ def try_close_popup(ctx: PopupCtx, page: Page):
     except Exception:
         pass
     dismiss_overlays(page)
-    wait_grid_visible(page, timeout=8000)
+    wait_grid_visible(page, timeout=6000)
 
 # ---------------- per-page ----------------
 def process_current_page(page: Page, state_label: str, writer, write_if_new):

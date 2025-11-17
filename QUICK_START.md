@@ -9,21 +9,21 @@
 
 2. **Test the API:**
    ```bash
-   curl http://localhost:8000/
+   curl http://localhost:6000/
    ```
 
 3. **Start a scraper:**
    ```bash
-   curl -X POST http://localhost:8000/scrape-apf/ucorealty
+   curl -X POST http://localhost:6000/scrape-apf/ucorealty
    ```
 
 4. **Check status:**
    ```bash
-   curl http://localhost:8000/status
+   curl http://localhost:6000/status
    ```
 
 5. **View API documentation:**
-   Open in browser: http://localhost:8000/docs
+   Open in browser: http://localhost:6000/docs
 
 ## 📋 Available Banks
 
@@ -40,14 +40,14 @@
 
 **List all banks:**
 ```bash
-curl http://localhost:8000/scripts
+curl http://localhost:6000/scripts
 ```
 
 **Start multiple scrapers:**
 ```bash
-curl -X POST http://localhost:8000/scrape-apf/axis
-curl -X POST http://localhost:8000/scrape-apf/canara
-curl -X POST http://localhost:8000/scrape-apf/federal
+curl -X POST http://localhost:6000/scrape-apf/axis
+curl -X POST http://localhost:6000/scrape-apf/canara
+curl -X POST http://localhost:6000/scrape-apf/federal
 ```
 
 **View logs:**
@@ -100,7 +100,7 @@ docker-compose up
 docker ps
 
 # Check health
-curl http://localhost:8000/health
+curl http://localhost:6000/health
 ```
 
 **Need to access container shell?**
