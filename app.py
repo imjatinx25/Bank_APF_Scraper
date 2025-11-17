@@ -8,7 +8,7 @@ import psutil
 
 from fastapi import FastAPI, HTTPException
 
-
+# Setup
 BASE_DIR = Path(__file__).parent
 OUT_DIR = BASE_DIR / "output"
 OUT_DIR.mkdir(exist_ok=True)
