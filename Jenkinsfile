@@ -75,29 +75,29 @@ pipeline {
             }
         }
 
-        stage('Stop and Remove Old Docker Container Running on Port 6000') {
+        stage('Stop and Remove Old Docker Container Running on Port 4000') {
             steps {
                 sh '''
-                    container_id=$(docker ps -q --filter "publish=6000")
+                    container_id=$(docker ps -q --filter "publish=4000")
                     if [ -n "$container_id" ]; then
                         docker stop $container_id
                         docker rm $container_id
                         echo 'Old container stopped and removed'
                     else
-                        echo 'No container running on port 6000'
+                        echo 'No container running on port 4000'
                     fi
                 '''
             }
         }
 
-        stage('Run New Docker Container on Port 6000') {
+        stage('Run New Docker Container on Port 4000') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'aws-credentials', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     sh '''
                         bash -c '
                         export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
                         export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-                        docker run -d -p 6000:6000 \
+                        docker run -d -p 4000:4000 \
                             -e AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
                             -e AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
                             --env-file .env \
@@ -129,6 +129,7 @@ pipeline {
                 iconEmoji: ':x:',
                 username: 'Jenkins'
             )
+            
         }
         always {
             cleanWs()
