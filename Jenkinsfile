@@ -35,7 +35,7 @@ pipeline {
 
         stage('Inject .env from Jenkins Secret') {
             steps {
-                withCredentials([file(credentialsId: 'jatin_env', variable: 'ENV_FILE2')]) {
+                withCredentials([file(credentialsId: 'apf_scrapping', variable: 'ENV_FILE2')]) {
                     sh '''
                         rm -f .env
                         cp $ENV_FILE2 .env
@@ -129,7 +129,7 @@ pipeline {
                 iconEmoji: ':x:',
                 username: 'Jenkins'
             )
-            
+
         }
         always {
             cleanWs()
