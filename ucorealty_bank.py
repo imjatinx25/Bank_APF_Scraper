@@ -29,7 +29,7 @@ WAIT_AFTER_CLICK_MS       = 900
 WAIT_AFTER_MODAL_READY_MS = 250
 EXPECT_POPUP_TIMEOUT_MS   = 4000
 MODAL_FIELD_TIMEOUT_MS    = 9000
-FINGERPRINT_TIMEOUT_MS    = 16000
+FINGERPRINT_TIMEOUT_MS    = 14000
 MAX_CLICK_RETRIES         = 3
 
 FIELDNAMES = [
@@ -168,7 +168,7 @@ def grid_fingerprint(page: Page) -> str:
             if (!t) return '';
             const node = t.querySelector('tbody') || t;
             const txt = (node.innerText || '').trim();
-            return txt.slice(0, 6000);
+            return txt.slice(0, 4000);
         }""",
         GRID
     ) or ""
@@ -295,8 +295,8 @@ def go_to_page_one(page: Page) -> bool:
 def ensure_grid_ready(page: Page) -> bool:
     """Robust guard after search/paging/closing popup. Soft-refresh if needed."""
     try:
-        wait_grid_visible(page, timeout=6000)
-        wait_rows_present(page, timeout=16000)
+        wait_grid_visible(page, timeout=4000)
+        wait_rows_present(page, timeout=14000)
         return True
     except PWTimeout:
         # soft refresh (safe due to per-state de-dupe)
@@ -304,8 +304,8 @@ def ensure_grid_ready(page: Page) -> bool:
             page.click(BTN)
             sleep(page, WAIT_AFTER_SEARCH_MS)
             wait_for_results_or_empty(page, timeout=20000)
-            wait_grid_visible(page, timeout=6000)
-            wait_rows_present(page, timeout=16000)
+            wait_grid_visible(page, timeout=4000)
+            wait_rows_present(page, timeout=14000)
             return True
         except Exception:
             return False
@@ -395,7 +395,7 @@ def try_close_popup(ctx: PopupCtx, page: Page):
     except Exception:
         pass
     dismiss_overlays(page)
-    wait_grid_visible(page, timeout=6000)
+    wait_grid_visible(page, timeout=4000)
 
 # ---------------- per-page ----------------
 def process_current_page(page: Page, state_label: str, writer, write_if_new):
@@ -473,7 +473,7 @@ def process_state(page: Page, state_label: str, state_value: str, writer):
         print(f"    [!] Dropdown not found for {state_label}, trying to reload page...")
         # Reload page if dropdown is not available
         try:
-            page.goto(BASE, wait_until="domcontentloaded", timeout=60000)
+            page.goto(BASE, wait_until="domcontentloaded", timeout=40000)
             page.wait_for_selector(DDL, state="visible", timeout=15000)
             sleep(page, 500)
         except PWTimeout:

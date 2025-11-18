@@ -58,8 +58,8 @@ RUN mkdir -p output
 ENV PYTHONUNBUFFERED=1
 
 # Expose port for FastAPI
-EXPOSE 6000
+EXPOSE 4000
 
 # Run the FastAPI application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "6000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4000"]
 

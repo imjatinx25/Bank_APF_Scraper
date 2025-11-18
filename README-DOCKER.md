@@ -45,7 +45,7 @@ docker-compose build
 
 ```bash
 docker run --rm \
-  -p 6000:6000 \
+  -p 4000:4000 \
   --env-file .env \
   -v "$(pwd)/output:/app/output" \
   bank-scraper-api
@@ -54,7 +54,7 @@ docker run --rm \
 On Windows PowerShell:
 ```powershell
 docker run --rm `
-  -p 6000:6000 `
+  -p 4000:4000 `
   --env-file .env `
   -v "${PWD}/output:/app/output" `
   bank-scraper-api
@@ -78,42 +78,42 @@ docker-compose logs -f
 
 ## Using the API
 
-Once the container is running, the API will be available at `http://localhost:6000`
+Once the container is running, the API will be available at `http://localhost:4000`
 
 ### Available Endpoints
 
 1. **Welcome**
    ```bash
-   curl http://localhost:6000/
+   curl http://localhost:4000/
    ```
 
 2. **Health Check**
    ```bash
-   curl http://localhost:6000/health
+   curl http://localhost:4000/health
    ```
 
 3. **List Available Banks**
    ```bash
-   curl http://localhost:6000/scripts
+   curl http://localhost:4000/scripts
    ```
 
 4. **Start a Scraper**
    ```bash
-   curl -X POST http://localhost:6000/scrape-apf/ucorealty
+   curl -X POST http://localhost:4000/scrape-apf/ucorealty
    ```
    
    Available banks: `axis`, `canara`, `federal`, `hsbc`, `icici_hfc`, `ucorealty`
 
 5. **Check Status of Running Scrapers**
    ```bash
-   curl http://localhost:6000/status
+   curl http://localhost:4000/status
    ```
 
 ### Example Usage
 
 Start UCO Realty scraper:
 ```bash
-curl -X POST http://localhost:6000/scrape-apf/ucorealty
+curl -X POST http://localhost:4000/scrape-apf/ucorealty
 ```
 
 Response:
@@ -129,7 +129,7 @@ Response:
 
 Check status:
 ```bash
-curl http://localhost:6000/status
+curl http://localhost:4000/status
 ```
 
 ## Output
@@ -170,7 +170,7 @@ To reduce size, consider using a multi-stage build or Alpine-based images (thoug
 
 ## API Documentation
 
-Once running, visit `http://localhost:6000/docs` for interactive API documentation (Swagger UI).
+Once running, visit `http://localhost:4000/docs` for interactive API documentation (Swagger UI).
 
 ## Notes
 
@@ -186,11 +186,11 @@ Once running, visit `http://localhost:6000/docs` for interactive API documentati
 To run on a different port, modify `docker-compose.yml`:
 ```yaml
 ports:
-  - "3000:6000"  # Run on port 3000 instead
+  - "3000:4000"  # Run on port 3000 instead
 ```
 
 Or with Docker directly:
 ```bash
-docker run -p 3000:6000 bank-scraper-api
+docker run -p 3000:4000 bank-scraper-api
 ```
 

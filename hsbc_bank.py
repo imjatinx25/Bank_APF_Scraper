@@ -35,7 +35,7 @@ def accept_consent_if_any(page):
             break
 
 def collect_cities(page):
-    page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+    page.goto(URL, wait_until="domcontentloaded", timeout=40000)
     accept_consent_if_any(page)
     page.wait_for_selector("a.A-LNKC28L-RW-ALL", timeout=30000)
     anchors = page.locator("a.A-LNKC28L-RW-ALL:visible")
@@ -55,7 +55,7 @@ def find_table(page):
 
 def scrape_city_table(browser, city):
     p = browser.new_page()
-    p.goto(city["url"], wait_until="domcontentloaded", timeout=60000)
+    p.goto(city["url"], wait_until="domcontentloaded", timeout=40000)
     accept_consent_if_any(p)
 
     table = find_table(p)
