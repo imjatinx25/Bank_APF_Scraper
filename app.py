@@ -54,21 +54,66 @@ def cleanup_finished_processes():
     """Remove finished processes from tracking and close log file handles"""
     finished = []
     for run_id, info in _active_processes.items():
+        proc = info.get("process")
+        pid = info.get("pid")
+        
+        # Method 1: Use subprocess.Popen.poll() - most reliable
+        # poll() returns None if process is still running, or returncode if finished
+        if proc is not None:
+            returncode = proc.poll()
+            if returncode is not None:
+                # Process has finished (returncode is 0 for success, non-zero for error)
+                finished.append(run_id)
+                continue
+        
+        # Method 2: Fallback to psutil check (for cases where proc object might be lost)
+        # Check if process exists and is actually running (not zombie)
         try:
-            # Check if process is still running
-            process = psutil.Process(info["pid"])
-            if not process.is_running():
+            process = psutil.Process(pid)
+            status = process.status()
+            # Check if process is actually running (not zombie, dead, or zombie)
+            if status in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
+                finished.append(run_id)
+            elif not process.is_running():
                 finished.append(run_id)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
+            # Process doesn't exist anymore
             finished.append(run_id)
+        except Exception:
+            # For any other exception, try to check via poll if we have proc
+            if proc is not None:
+                try:
+                    if proc.poll() is not None:
+                        finished.append(run_id)
+                except Exception:
+                    # If all checks fail, assume process is finished
+                    finished.append(run_id)
     
     for run_id in finished:
         info = _active_processes.pop(run_id, None)
-        if info and "log_file_handle" in info:
-            try:
-                info["log_file_handle"].close()
-            except Exception:
-                pass  # File may already be closed
+        if info:
+            # Close log file handle
+            if "log_file_handle" in info:
+                try:
+                    info["log_file_handle"].close()
+                except Exception:
+                    pass  # File may already be closed
+            
+            # Clean up subprocess object (just wait for it to finish if still running)
+            if "process" in info:
+                proc = info["process"]
+                try:
+                    # If process is still running (shouldn't happen, but just in case)
+                    if proc.poll() is None:
+                        # Give it a moment, then check again
+                        try:
+                            proc.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            # If it's still running after timeout, it might be stuck
+                            # Log but don't kill - let the OS handle it
+                            pass
+                except Exception:
+                    pass
 
 
 @app.post("/scrape-apf/{bank}")
@@ -135,18 +180,52 @@ def list_scripts():
 def get_status():
     """Get status of active scraper runs"""
     cleanup_finished_processes()
+    
+    processes_info = []
+    for run_id, info in _active_processes.items():
+        proc = info.get("process")
+        pid = info.get("pid")
+        status_detail = "unknown"
+        returncode = None
+        
+        # Check process status
+        if proc is not None:
+            returncode = proc.poll()
+            if returncode is None:
+                status_detail = "running"
+            else:
+                status_detail = f"finished (exit code: {returncode})"
+        else:
+            # Fallback to psutil if proc object not available
+            try:
+                process = psutil.Process(pid)
+                status = process.status()
+                if status == psutil.STATUS_ZOMBIE:
+                    status_detail = "zombie (finished)"
+                elif status == psutil.STATUS_DEAD:
+                    status_detail = "dead (finished)"
+                elif process.is_running():
+                    status_detail = "running"
+                else:
+                    status_detail = "finished"
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                status_detail = "not found (finished)"
+            except Exception:
+                status_detail = "unknown"
+        
+        processes_info.append({
+            "run_id": run_id,
+            "bank": info["bank"],
+            "pid": pid,
+            "log_file": info["log_file"],
+            "started_at": info["started_at"],
+            "status": status_detail,
+            "returncode": returncode,
+        })
+    
     return {
         "active_runs": len(_active_processes),
-        "processes": [
-            {
-                "run_id": run_id,
-                "bank": info["bank"],
-                "pid": info["pid"],
-                "log_file": info["log_file"],
-                "started_at": info["started_at"],
-            }
-            for run_id, info in _active_processes.items()
-        ]
+        "processes": processes_info
     }
 
 
