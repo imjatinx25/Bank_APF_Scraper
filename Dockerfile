@@ -4,10 +4,11 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies required for Playwright, Java (for tabula-py), and health checks
+# Install system dependencies required for Playwright, Selenium (Chrome), Java (for tabula-py), and health checks
 RUN apt-get update && apt-get install -y \
     wget \
     curl \
+    gnupg \
     default-jre \
     ca-certificates \
     fonts-liberation \
@@ -35,6 +36,13 @@ RUN apt-get update && apt-get install -y \
     libxrandr2 \
     libxshmfence1 \
     xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome for Selenium (required for 99acres scraper and other Selenium scrapers)
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file

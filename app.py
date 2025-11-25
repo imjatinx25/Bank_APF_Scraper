@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import os
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Literal
@@ -174,6 +175,182 @@ def start_scrape(bank: Literal["axis","canara","federal","hsbc","icici_hfc","uco
 @app.get("/scripts")
 def list_scripts():
     return {"banks": sorted(BANK_TO_SCRIPT.keys())}
+
+
+@app.post("/scrape-99acres")
+def start_99acres_scraper():
+    """Start the 99acres property scraper"""
+    script_name = "acres99_property_scraper.py"
+    script_path = BASE_DIR / script_name
+    
+    if not script_path.exists():
+        raise HTTPException(status_code=404, detail=f"Scraper file '{script_name}' not found")
+    
+    # Clean up finished processes
+    cleanup_finished_processes()
+    
+    # Per-run log file with timestamp to ensure uniqueness
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = OUT_DIR / f"run_99acres_{ts}.log"
+    
+    # Open log file in unbuffered mode for real-time logging
+    log_file_handle = log_file.open("w", encoding="utf-8", newline="", buffering=1)
+    
+    # Launch the scraper as a background subprocess to avoid blocking the API worker
+    # Use -u flag for unbuffered Python output + PYTHONUNBUFFERED for real-time logs
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script_path)],  # -u flag = unbuffered stdout/stderr
+        cwd=str(BASE_DIR),
+        stdout=log_file_handle,
+        stderr=subprocess.STDOUT,
+        bufsize=1,  # Line buffered for real-time output
+        universal_newlines=True,
+        env=env,
+    )
+    
+    # Track this process
+    run_id = f"99acres_{ts}"
+    _active_processes[run_id] = {
+        "bank": "99acres",  # Using "bank" field for consistency, but it's actually a property scraper
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "log_file_handle": log_file_handle,
+        "started_at": ts,
+        "process": proc,
+    }
+    
+    return {
+        "message": "Started 99acres property scraper",
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "run_id": run_id,
+        "note": "The scraper will save data to 99acres_properties.csv and upload it to S3 upon completion."
+    }
+
+
+@app.delete("/stop/{pid_or_run_id}")
+def stop_scraper(pid_or_run_id: str):
+    """Stop a running scraper by PID or run_id"""
+    cleanup_finished_processes()
+    
+    # Try to find by run_id first
+    info = _active_processes.get(pid_or_run_id)
+    
+    # If not found by run_id, try to find by PID
+    if not info:
+        try:
+            pid = int(pid_or_run_id)
+            for run_id, proc_info in _active_processes.items():
+                if proc_info.get("pid") == pid:
+                    info = proc_info
+                    pid_or_run_id = run_id  # Update to use run_id for cleanup
+                    break
+        except ValueError:
+            pass  # Not a valid PID
+    
+    if not info:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Process with PID or run_id '{pid_or_run_id}' not found or not running"
+        )
+    
+    proc = info.get("process")
+    pid = info.get("pid")
+    run_id = pid_or_run_id
+    bank = info.get("bank", "unknown")
+    
+    killed = False
+    error_message = None
+    
+    # Method 1: Try to terminate via subprocess.Popen object
+    if proc is not None:
+        try:
+            if proc.poll() is None:  # Process is still running
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                    killed = True
+                except subprocess.TimeoutExpired:
+                    # Process didn't terminate gracefully, force kill
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=2)
+                        killed = True
+                    except subprocess.TimeoutExpired:
+                        error_message = "Process did not terminate after kill signal"
+        except Exception as e:
+            error_message = f"Error terminating process: {str(e)}"
+    
+    # Method 2: Fallback to psutil to kill process and children
+    if not killed:
+        try:
+            process = psutil.Process(pid)
+            # Kill all child processes first (like Chrome driver)
+            try:
+                children = process.children(recursive=True)
+                for child in children:
+                    try:
+                        child.terminate()
+                    except psutil.NoSuchProcess:
+                        pass
+                
+                # Wait a bit for children to terminate
+                time.sleep(1)
+                
+                # Force kill any remaining children
+                for child in process.children(recursive=True):
+                    try:
+                        child.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+            except psutil.NoSuchProcess:
+                pass
+            
+            # Now kill the main process
+            try:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                    killed = True
+                except psutil.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
+                    killed = True
+            except psutil.NoSuchProcess:
+                killed = True  # Already dead
+        except psutil.NoSuchProcess:
+            killed = True  # Process already finished
+        except Exception as e:
+            error_message = f"Error killing process: {str(e)}"
+    
+    # Clean up tracking
+    if run_id in _active_processes:
+        info = _active_processes.pop(run_id)
+        # Close log file handle
+        if "log_file_handle" in info:
+            try:
+                info["log_file_handle"].close()
+            except Exception:
+                pass
+    
+    if killed:
+        return {
+            "message": f"Successfully stopped scraper '{bank}' (PID: {pid}, run_id: {run_id})",
+            "pid": pid,
+            "run_id": run_id,
+            "status": "stopped"
+        }
+    else:
+        return {
+            "message": f"Attempted to stop scraper '{bank}' (PID: {pid}, run_id: {run_id})",
+            "pid": pid,
+            "run_id": run_id,
+            "status": "attempted",
+            "warning": error_message or "Process may have already finished"
+        }
 
 
 @app.get("/status")
