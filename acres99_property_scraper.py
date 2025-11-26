@@ -6,6 +6,7 @@ import boto3
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
@@ -74,14 +75,39 @@ driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () =>
 
 def close_popup_if_exists():
     """Close any popup/overlay that might appear"""
-    try:
-        # Try to find and close RERA disclaimer popup
-        ok_button = driver.find_element(By.CSS_SELECTOR, '[data-label="RERA_DISCLAIMER.OK_GOT_IT"]')
-        ok_button.click()
-        print("  [OK] Closed popup")
-        time.sleep(1)
-    except:
-        pass
+    popup_closed = False
+    
+    # Try multiple popup close methods
+    popup_selectors = [
+        '[data-label="RERA_DISCLAIMER.OK_GOT_IT"]',
+        '.modal-close',
+        '.close-button',
+        '[aria-label="Close"]',
+        'button[class*="close"]',
+        '.overlay-close',
+        '#close-popup',
+    ]
+    
+    for selector in popup_selectors:
+        try:
+            popup = driver.find_element(By.CSS_SELECTOR, selector)
+            if popup.is_displayed():
+                driver.execute_script("arguments[0].click();", popup)
+                print("  [OK] Closed popup")
+                popup_closed = True
+                time.sleep(0.5)
+                break
+        except:
+            continue
+    
+    # Try pressing Escape key to close any modal
+    if not popup_closed:
+        try:
+            body = driver.find_element(By.TAG_NAME, "body")
+            body.send_keys(Keys.ESCAPE)
+            time.sleep(0.5)
+        except:
+            pass
 
 
 def search_city(city_name):
@@ -91,18 +117,82 @@ def search_city(city_name):
         print(f"Searching for properties in: {city_name}")
         print(f"{'='*60}")
         
-        # Go to homepage
+        # Go to homepage - always start fresh for each city
         driver.get("https://www.99acres.com/")
-        time.sleep(2)
         
-        # Find search input
-        search_input = driver.find_element(By.ID, "keyword2")
-        search_input.clear()
+        # Wait for page to load
+        time.sleep(3)
         
-        # Type city name character by character
-        for char in city_name:
-            search_input.send_keys(char)
-            time.sleep(0.05)
+        # Close any popups/overlays multiple times to ensure they're gone
+        for _ in range(3):
+            close_popup_if_exists()
+            time.sleep(1)
+        
+        # Wait for search input to be available and interactable - try multiple selectors
+        search_input = None
+        wait = WebDriverWait(driver, 15)
+        
+        # Try different selectors for the search input - wait for it to be clickable, not just present
+        selectors = [
+            (By.ID, "keyword2"),
+            (By.CSS_SELECTOR, "input[id='keyword2']"),
+            (By.CSS_SELECTOR, "input[placeholder*='Search']"),
+            (By.CSS_SELECTOR, "input[type='text'][name*='keyword']"),
+            (By.CSS_SELECTOR, "#searchform input[type='text']"),
+        ]
+        
+        for selector_type, selector_value in selectors:
+            try:
+                # Wait for element to be clickable (visible and enabled), not just present
+                search_input = wait.until(EC.element_to_be_clickable((selector_type, selector_value)))
+                print(f"  Found search input using: {selector_type} = {selector_value}")
+                break
+            except TimeoutException:
+                continue
+        
+        if not search_input:
+            # Try to find any input in the search form
+            try:
+                search_form = wait.until(EC.presence_of_element_located((By.ID, "searchform")))
+                search_input = wait.until(EC.element_to_be_clickable((By.TAG_NAME, "input")))
+                print(f"  Found search input in search form")
+            except:
+                raise Exception("Could not locate search input element. Website structure may have changed.")
+        
+        # Scroll to element and ensure it's visible
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
+        time.sleep(1)
+        
+        # Close popups again after scrolling (in case they reappeared)
+        close_popup_if_exists()
+        time.sleep(0.5)
+        
+        # Try to clear using JavaScript if regular clear doesn't work
+        try:
+            search_input.clear()
+        except:
+            driver.execute_script("arguments[0].value = '';", search_input)
+        time.sleep(0.5)
+        
+        # Click on the input first to ensure it's focused
+        try:
+            search_input.click()
+        except:
+            driver.execute_script("arguments[0].click();", search_input)
+        time.sleep(0.5)
+        
+        # Type city name - try regular typing first, fallback to JavaScript if needed
+        try:
+            # Type city name character by character
+            for char in city_name:
+                search_input.send_keys(char)
+                time.sleep(0.05)
+        except Exception as e:
+            # If regular typing fails, use JavaScript
+            print(f"  Regular typing failed, using JavaScript: {e}")
+            driver.execute_script("arguments[0].value = arguments[1];", search_input, city_name)
+            # Trigger input event to show suggestions
+            driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", search_input)
         
         # Wait for dropdown suggestions
         time.sleep(2)
@@ -118,12 +208,30 @@ def search_city(city_name):
         except Exception as e:
             print(f"  No suggestions clicked, proceeding with direct search")
         
-        # Click search button
-        search_button = driver.find_element(By.ID, "searchform_search_btn")
+        # Find and click search button - try multiple selectors
+        search_button = None
+        button_selectors = [
+            (By.ID, "searchform_search_btn"),
+            (By.CSS_SELECTOR, "button[type='submit']"),
+            (By.CSS_SELECTOR, "#searchform button"),
+            (By.CSS_SELECTOR, "input[type='submit']"),
+        ]
+        
+        for selector_type, selector_value in button_selectors:
+            try:
+                search_button = driver.find_element(selector_type, selector_value)
+                print(f"  Found search button using: {selector_type} = {selector_value}")
+                break
+            except:
+                continue
+        
+        if not search_button:
+            raise Exception("Could not locate search button element.")
+        
         driver.execute_script("arguments[0].click();", search_button)
         time.sleep(3)
         
-        # Close any popup
+        # Close any popup after search
         close_popup_if_exists()
         
         return True
@@ -654,6 +762,11 @@ def main():
             all_properties.extend(properties)
             
             print(f"\n  [PROGRESS] {len(properties)} properties from {city} (Total: {len(all_properties)})")
+            
+            # Upload CSV to S3 after each city completes
+            print(f"\n  [INFO] Uploading CSV to S3 after completing {city}...")
+            upload_csv_to_s3()
+            
             time.sleep(3)  # Delay between cities
         
         print("\n" + "="*60)
