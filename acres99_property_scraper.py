@@ -130,34 +130,75 @@ def search_city(city_name):
         
         # Wait for search input to be available and interactable - try multiple selectors
         search_input = None
-        wait = WebDriverWait(driver, 15)
+        wait = WebDriverWait(driver, 20)
         
-        # Try different selectors for the search input - wait for it to be clickable, not just present
+        # Try different selectors for the search input - first try presence, then clickable
         selectors = [
             (By.ID, "keyword2"),
             (By.CSS_SELECTOR, "input[id='keyword2']"),
+            (By.CSS_SELECTOR, "#keyword2"),
             (By.CSS_SELECTOR, "input[placeholder*='Search']"),
+            (By.CSS_SELECTOR, "input[placeholder*='search']"),
             (By.CSS_SELECTOR, "input[type='text'][name*='keyword']"),
             (By.CSS_SELECTOR, "#searchform input[type='text']"),
+            (By.CSS_SELECTOR, "form#searchform input"),
+            (By.CSS_SELECTOR, ".search-input"),
+            (By.CSS_SELECTOR, "input.autocomplete-input"),
         ]
         
+        # First, try to find element by presence (faster)
         for selector_type, selector_value in selectors:
             try:
-                # Wait for element to be clickable (visible and enabled), not just present
-                search_input = wait.until(EC.element_to_be_clickable((selector_type, selector_value)))
-                print(f"  Found search input using: {selector_type} = {selector_value}")
+                search_input = wait.until(EC.presence_of_element_located((selector_type, selector_value)))
+                print(f"  Found search input (presence) using: {selector_type} = {selector_value}")
                 break
             except TimeoutException:
                 continue
         
+        # If found by presence, wait for it to be clickable
+        if search_input:
+            try:
+                wait.until(EC.element_to_be_clickable(search_input))
+            except TimeoutException:
+                # If not clickable, try to make it clickable by removing overlays
+                driver.execute_script("arguments[0].style.zIndex = '9999';", search_input)
+                close_popup_if_exists()
+        
+        # If still not found, try finding in search form
         if not search_input:
-            # Try to find any input in the search form
             try:
                 search_form = wait.until(EC.presence_of_element_located((By.ID, "searchform")))
-                search_input = wait.until(EC.element_to_be_clickable((By.TAG_NAME, "input")))
-                print(f"  Found search input in search form")
+                # Try to find input within the form
+                inputs = search_form.find_elements(By.TAG_NAME, "input")
+                for inp in inputs:
+                    if inp.get_attribute("type") in ["text", "search", None]:
+                        search_input = inp
+                        print(f"  Found search input in search form")
+                        break
+            except Exception as e:
+                print(f"  [DEBUG] Search form not found: {e}")
+        
+        # Last resort: find any text input on the page
+        if not search_input:
+            try:
+                all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search']")
+                for inp in all_inputs:
+                    placeholder = inp.get_attribute("placeholder") or ""
+                    if "search" in placeholder.lower() or "city" in placeholder.lower() or "location" in placeholder.lower():
+                        search_input = inp
+                        print(f"  Found search input by placeholder: {placeholder}")
+                        break
+            except Exception as e:
+                print(f"  [DEBUG] Could not find any text input: {e}")
+        
+        if not search_input:
+            # Take a screenshot for debugging
+            try:
+                driver.save_screenshot("output/search_input_error.png")
+                print(f"  [DEBUG] Screenshot saved to output/search_input_error.png")
             except:
-                raise Exception("Could not locate search input element. Website structure may have changed.")
+                pass
+            raise Exception("Could not locate search input element. Website structure may have changed.")
         
         # Scroll to element and ensure it's visible
         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
@@ -721,12 +762,28 @@ def save_to_csv(properties, filename="output/99acres_properties.csv"):
 def upload_csv_to_s3():
     """Upload CSV file to S3"""
     try:
+        csv_path = "output/99acres_properties.csv"
+        
+        # Check if CSV file exists
+        if not os.path.exists(csv_path):
+            print(f"[WARNING] CSV file not found: {csv_path}, skipping S3 upload")
+            return
+        
+        # Check if file is empty
+        if os.path.getsize(csv_path) == 0:
+            print(f"[WARNING] CSV file is empty, skipping S3 upload")
+            return
+        
         load_dotenv()
         bucket = os.getenv('S3_BUCKET_NAME')
+        if not bucket:
+            print(f"[ERROR] S3_BUCKET_NAME not set in environment, skipping S3 upload")
+            return
+        
         # key_prefix = os.getenv('S3_KEY')
         key_prefix = "test_apf_apis/"
         
-        with open("output/99acres_properties.csv", 'rb') as f:
+        with open(csv_path, 'rb') as f:
             csv_content = f.read()
         
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
