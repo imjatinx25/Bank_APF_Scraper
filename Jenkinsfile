@@ -153,7 +153,7 @@ pipeline {
         stage('Post-Deploy log fanout') {
             steps {
                 sh '''
-                docker exec -d apf_scraper sh -lc '
+                docker exec -d apf_scrapping sh -lc '
                 seen=""
                 while true; do
                     for f in /app/output/*.log; do
