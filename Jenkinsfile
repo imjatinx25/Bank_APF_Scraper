@@ -150,6 +150,27 @@ pipeline {
                 }
             }
         }
+        stage('Post-Deploy log fanout') {
+            steps {
+                sh '''
+                docker exec -d apf_scraper sh -lc '
+                seen=""
+                while true; do
+                    for f in /app/output/*.log; do
+                    case " $seen " in *" $f "*) : ;;
+                    *) [ -f "$f" ] && {
+                        seen="$seen $f"
+                        ( tail -n +1 -F "$f" 1>/proc/1/fd/1 2>/proc/1/fd/2 ) &
+                        }
+                    esac
+                    done
+                    sleep 5
+                done
+                '
+                '''
+            }
+        }
+
     }
     post {
         success {
