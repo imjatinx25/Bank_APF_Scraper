@@ -231,6 +231,59 @@ def start_99acres_scraper():
     }
 
 
+@app.post("/scrape-proptiger")
+def start_proptiger_scraper():
+    """Start the Proptiger property scraper"""
+    script_name = "proptiger_property_scraper.py"
+    script_path = BASE_DIR / script_name
+
+    if not script_path.exists():
+        raise HTTPException(status_code=404, detail=f"Scraper file '{script_name}' not found")
+
+    # Clean up finished processes
+    cleanup_finished_processes()
+
+    # Per-run log file with timestamp to ensure uniqueness
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = OUT_DIR / f"run_proptiger_{ts}.log"
+
+    # Open log file in unbuffered mode for real-time logging
+    log_file_handle = log_file.open("w", encoding="utf-8", newline="", buffering=1)
+
+    # Launch the scraper as a background subprocess to avoid blocking the API worker
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(script_path)],
+        cwd=str(BASE_DIR),
+        stdout=log_file_handle,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        universal_newlines=True,
+        env=env,
+    )
+
+    # Track this process
+    run_id = f"proptiger_{ts}"
+    _active_processes[run_id] = {
+        "bank": "proptiger",  # Using "bank" field for consistency, but it's a property scraper
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "log_file_handle": log_file_handle,
+        "started_at": ts,
+        "process": proc,
+    }
+
+    return {
+        "message": "Started Proptiger property scraper",
+        "pid": proc.pid,
+        "log_file": str(log_file),
+        "run_id": run_id,
+        "note": "The scraper will save data to output/proptiger_properties.csv."
+    }
+
+
 @app.delete("/stop/{pid_or_run_id}")
 def stop_scraper(pid_or_run_id: str):
     """Stop a running scraper by PID or run_id"""
