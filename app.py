@@ -11,11 +11,17 @@ from fastapi import FastAPI, HTTPException
 
 # Setup
 BASE_DIR = Path(__file__).parent
+APF_DIR = BASE_DIR / "APF_Scripts"
+PROP_DIR = BASE_DIR / "Property_Scripts"
+
 OUT_DIR = BASE_DIR / "output"
 OUT_DIR.mkdir(exist_ok=True)
 
 # Track active scraper processes
 _active_processes: dict[str, dict] = {}
+
+# Log rotation settings
+MAX_LOGS = 20
 
 
 # Map friendly bank names to script files in this folder
@@ -26,29 +32,32 @@ BANK_TO_SCRIPT = {
     "hsbc": "hsbc_bank.py",
     "icici_hfc": "icici_hfc.py",
     "ucorealty": "ucorealty_bank.py",
+    "pnsbank": "pnsbank.py",
+    "yesbank": "yesbank.py"
 }
 
 
-def resolve_script(bank: str) -> Path:
-    script = BANK_TO_SCRIPT.get(bank.lower())
-    if not script:
-        raise KeyError(bank)
-    path = BASE_DIR / script
+PROPERTY_TO_SCRIPT = {
+    "acres99": "acres99_property_scraper.py",
+    "proptiger" : "proptiger_property_scraper.py"
+}
+
+
+def resolve_script(scraper_type: str, scraper_name: str) -> Path:
+    if scraper_type == "apf":
+        script = BANK_TO_SCRIPT.get(scraper_name.lower())
+        if not script:
+            raise KeyError(scraper_name)
+        path = APF_DIR / script
+    else:
+        script = PROPERTY_TO_SCRIPT.get(scraper_name.lower())
+        if not script:
+            raise KeyError(scraper_name)
+        path = PROP_DIR / script
+
     if not path.exists():
         raise FileNotFoundError(str(path))
     return path
-
-
-app = FastAPI(title="Bank APF Scrapers API")
-
-@app.get("/")
-def welcome():
-    return {"status": 200, "message": "Welcome to the Bank APF Scrapers API"}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
 
 def cleanup_finished_processes():
@@ -58,7 +67,7 @@ def cleanup_finished_processes():
         proc = info.get("process")
         pid = info.get("pid")
         
-        # Method 1: Use subprocess.Popen.poll() - most reliable
+        # Use subprocess.Popen.poll() - most reliable
         # poll() returns None if process is still running, or returncode if finished
         if proc is not None:
             returncode = proc.poll()
@@ -67,7 +76,7 @@ def cleanup_finished_processes():
                 finished.append(run_id)
                 continue
         
-        # Method 2: Fallback to psutil check (for cases where proc object might be lost)
+        # Fallback to psutil check (for cases where proc object might be lost)
         # Check if process exists and is actually running (not zombie)
         try:
             process = psutil.Process(pid)
@@ -115,12 +124,61 @@ def cleanup_finished_processes():
                             pass
                 except Exception:
                     pass
+    
+    # Rotate log files
+    rotate_logs()
+
+
+def rotate_logs():
+    """Keep only the most recent N log files to save space"""
+    try:
+        # Get all run_*.log files sorted by modification time (newest first)
+        log_files = sorted(
+            OUT_DIR.glob("run_*.log"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        
+        if len(log_files) > MAX_LOGS:
+            # Get paths of logs currently in use by active processes
+            active_log_paths = {info.get("log_file") for info in _active_processes.values()}
+            
+            # Delete oldest files that aren't active
+            for old_log in log_files[MAX_LOGS:]:
+                if str(old_log) not in active_log_paths:
+                    try:
+                        old_log.unlink()
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"Error rotating logs: {e}")
+
+
+app = FastAPI(title="Bank APF Scrapers API")
+
+@app.get("/")
+def welcome():
+    return {"status": 200, "message": "Welcome to the Bank APF Scrapers API"}
+
+# Need health check for this routes
+@app.get("/health")
+def health():
+    # health checks
+    return {"status": "ok"}
+
+# check all available scripts
+@app.get("/scripts")
+def list_scripts():
+    return {
+        "apf_bank": sorted(BANK_TO_SCRIPT.keys()),
+        "property": sorted(PROPERTY_TO_SCRIPT.keys())
+    }
 
 
 @app.post("/scrape-apf/{bank}")
-def start_scrape(bank: Literal["axis","canara","federal","hsbc","icici_hfc","ucorealty"]):
+def start_apf_scraper(bank):
     try:
-        script_path = resolve_script(bank)
+        script_path = resolve_script("apf", bank)
     except (KeyError, FileNotFoundError):
         raise HTTPException(status_code=404, detail=f"Unknown or missing scraper for bank '{bank}'")
 
@@ -172,26 +230,20 @@ def start_scrape(bank: Literal["axis","canara","federal","hsbc","icici_hfc","uco
     }
 
 
-@app.get("/scripts")
-def list_scripts():
-    return {"banks": sorted(BANK_TO_SCRIPT.keys())}
-
-
-@app.post("/scrape-99acres")
-def start_99acres_scraper():
-    """Start the 99acres property scraper"""
-    script_name = "acres99_property_scraper.py"
-    script_path = BASE_DIR / script_name
-    
-    if not script_path.exists():
-        raise HTTPException(status_code=404, detail=f"Scraper file '{script_name}' not found")
+@app.post("/scrape-property/{property}")
+def start_property_scraper(property):
+    """Start the property scraper"""
+    try:
+        script_path = resolve_script("property", property)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(status_code=404, detail=f"Unknown or missing scraper for property '{property}'")
     
     # Clean up finished processes
     cleanup_finished_processes()
     
     # Per-run log file with timestamp to ensure uniqueness
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = OUT_DIR / f"run_99acres_{ts}.log"
+    log_file = OUT_DIR / f"run_{property}_{ts}.log"
     
     # Open log file in unbuffered mode for real-time logging
     log_file_handle = log_file.open("w", encoding="utf-8", newline="", buffering=1)
@@ -212,9 +264,9 @@ def start_99acres_scraper():
     )
     
     # Track this process
-    run_id = f"99acres_{ts}"
+    run_id = f"{property}_{ts}"
     _active_processes[run_id] = {
-        "bank": "99acres",  # Using "bank" field for consistency, but it's actually a property scraper
+        "property": property,
         "pid": proc.pid,
         "log_file": str(log_file),
         "log_file_handle": log_file_handle,
@@ -223,64 +275,11 @@ def start_99acres_scraper():
     }
     
     return {
-        "message": "Started 99acres property scraper",
+        "message": f"Started {property} property scraper",
         "pid": proc.pid,
         "log_file": str(log_file),
         "run_id": run_id,
-        "note": "The scraper will save data to 99acres_properties.csv and upload it to S3 upon completion."
-    }
-
-
-@app.post("/scrape-proptiger")
-def start_proptiger_scraper():
-    """Start the Proptiger property scraper"""
-    script_name = "proptiger_property_scraper.py"
-    script_path = BASE_DIR / script_name
-
-    if not script_path.exists():
-        raise HTTPException(status_code=404, detail=f"Scraper file '{script_name}' not found")
-
-    # Clean up finished processes
-    cleanup_finished_processes()
-
-    # Per-run log file with timestamp to ensure uniqueness
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = OUT_DIR / f"run_proptiger_{ts}.log"
-
-    # Open log file in unbuffered mode for real-time logging
-    log_file_handle = log_file.open("w", encoding="utf-8", newline="", buffering=1)
-
-    # Launch the scraper as a background subprocess to avoid blocking the API worker
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-
-    proc = subprocess.Popen(
-        [sys.executable, "-u", str(script_path)],
-        cwd=str(BASE_DIR),
-        stdout=log_file_handle,
-        stderr=subprocess.STDOUT,
-        bufsize=1,
-        universal_newlines=True,
-        env=env,
-    )
-
-    # Track this process
-    run_id = f"proptiger_{ts}"
-    _active_processes[run_id] = {
-        "bank": "proptiger",  # Using "bank" field for consistency, but it's a property scraper
-        "pid": proc.pid,
-        "log_file": str(log_file),
-        "log_file_handle": log_file_handle,
-        "started_at": ts,
-        "process": proc,
-    }
-
-    return {
-        "message": "Started Proptiger property scraper",
-        "pid": proc.pid,
-        "log_file": str(log_file),
-        "run_id": run_id,
-        "note": "The scraper will save data to output/proptiger_properties.csv."
+        "note": f"The scraper will save data to {property}_properties.csv and upload it to S3 upon completion."
     }
 
 
@@ -315,69 +314,64 @@ def stop_scraper(pid_or_run_id: str):
     run_id = pid_or_run_id
     bank = info.get("bank", "unknown")
     
-    killed = False
-    error_message = None
-    
-    # Method 1: Try to terminate via subprocess.Popen object
-    if proc is not None:
+    # Primary Method: Use psutil to kill the process and all its children (browsers, drivers, etc.)
+    try:
+        process = psutil.Process(pid)
+        
+        # Kill all child processes (recursively) first
         try:
-            if proc.poll() is None:  # Process is still running
+            children = process.children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            
+            # Wait for children to terminate
+            psutil.wait_procs(children, timeout=3)
+            
+            # Force kill any remaining children
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+        # Now kill the main process
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+                killed = True
+            except psutil.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+                killed = True
+        except psutil.NoSuchProcess:
+            killed = True  # Already dead
+            
+    except psutil.NoSuchProcess:
+        killed = True  # Main process already finished
+    except Exception as e:
+        error_message = f"Error killing process: {str(e)}"
+    
+    # Method 2 (Fallback): Try to terminate via subprocess.Popen object if not already marked as killed
+    if not killed and proc is not None:
+        try:
+            if proc.poll() is None:
                 proc.terminate()
                 try:
-                    proc.wait(timeout=5)
+                    proc.wait(timeout=3)
                     killed = True
                 except subprocess.TimeoutExpired:
-                    # Process didn't terminate gracefully, force kill
                     proc.kill()
-                    try:
-                        proc.wait(timeout=2)
-                        killed = True
-                    except subprocess.TimeoutExpired:
-                        error_message = "Process did not terminate after kill signal"
-        except Exception as e:
-            error_message = f"Error terminating process: {str(e)}"
-    
-    # Method 2: Fallback to psutil to kill process and children
-    if not killed:
-        try:
-            process = psutil.Process(pid)
-            # Kill all child processes first (like Chrome driver)
-            try:
-                children = process.children(recursive=True)
-                for child in children:
-                    try:
-                        child.terminate()
-                    except psutil.NoSuchProcess:
-                        pass
-                
-                # Wait a bit for children to terminate
-                time.sleep(1)
-                
-                # Force kill any remaining children
-                for child in process.children(recursive=True):
-                    try:
-                        child.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-            except psutil.NoSuchProcess:
-                pass
-            
-            # Now kill the main process
-            try:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
+                    proc.wait(timeout=2)
                     killed = True
-                except psutil.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=2)
-                    killed = True
-            except psutil.NoSuchProcess:
-                killed = True  # Already dead
-        except psutil.NoSuchProcess:
-            killed = True  # Process already finished
         except Exception as e:
-            error_message = f"Error killing process: {str(e)}"
+            error_message = f"Error in fallback termination: {str(e)}"
     
     # Clean up tracking
     if run_id in _active_processes:
@@ -443,9 +437,14 @@ def get_status():
             except Exception:
                 status_detail = "unknown"
         
+        if info.get("bank") != None:
+            scraper_name = info["bank"]
+        else:
+            scraper_name = info["property"]
+
         processes_info.append({
             "run_id": run_id,
-            "bank": info["bank"],
+            "scraper_name": scraper_name,
             "pid": pid,
             "log_file": info["log_file"],
             "started_at": info["started_at"],

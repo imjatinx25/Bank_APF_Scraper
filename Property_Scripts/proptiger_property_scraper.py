@@ -16,7 +16,8 @@ import boto3
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).parent
+# Use root output folder (same as app.py), not Property_Scripts/output
+BASE_DIR = Path(__file__).parent.parent  # Go up to root directory
 OUT_DIR = BASE_DIR / "output"
 OUT_DIR.mkdir(exist_ok=True)
 
@@ -60,7 +61,7 @@ def upload_csv_to_s3():
             print("[ERROR] S3_BUCKET_NAME not set, skipping S3 upload")
             return
 
-        key_prefix = os.getenv("S3_KEY") or "test_apf_apis/"
+        key_prefix = os.getenv("S3_KEY")
 
         with open(csv_path, "rb") as f:
             csv_content = f.read()
@@ -903,7 +904,7 @@ def scrape_city_properties(city_name):
     return 0
 
 
-def save_to_csv(properties, filename="proptiger_properties.csv"):
+def save_to_csv(properties, filename="output/proptiger_properties.csv"):
     """Save all properties to CSV file"""
     if not properties:
         print("\n[WARN] No properties to save")

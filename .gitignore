@@ -1,4 +1,5 @@
 .venv
 /output
 .env
-99acres_properties.csv
+
+__pycache__

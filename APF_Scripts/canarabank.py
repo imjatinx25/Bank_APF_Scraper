@@ -101,7 +101,8 @@ def scrape_canara_apf():
 
             if not success:
                 print(f" Skipped city index {index} after retries.")
-
+    except Exception as e:
+        print(f"[ERROR]: {str(e)}")
     finally:
         driver.quit()
         print(" Scraping completed.")
@@ -146,6 +147,8 @@ def data_processing():
         print(f"Data uploaded to S3: {s3_key}")
     except Exception as e:
         print(f"Error: {str(e)}")
+    finally:
+        CSV_PATH.unlink()
 
 if __name__ == "__main__":
     print("Starting Canara Bank APF scraper...")

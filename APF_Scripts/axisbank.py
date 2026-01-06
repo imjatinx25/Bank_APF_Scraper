@@ -206,7 +206,7 @@ def scrape_axis_apf():
                         print("[DEBUG] No more pages to visit.")
                         break
 
-                    # ✅ Only append to CSV after full city scrape
+                    # Only append to CSV after full city scrape
                     if city_data_rows:
                         df = pd.DataFrame(city_data_rows)
                         OUT_DIR = Path("output"); OUT_DIR.mkdir(exist_ok=True)
@@ -226,7 +226,8 @@ def scrape_axis_apf():
 
             if not success:
                 print(f"[FAIL] City index {index} failed after 3 retries.")
-
+    except Exception as e:
+        print(f"[Error] {str(e)}")
     finally:
         driver.quit()
 

@@ -394,6 +394,7 @@ def main():
             sys.exit(1)
     finally:
         remove_file_with_retries(PDF_PATH)
+        CSV_PATH.unlink()
 
 if __name__ == "__main__":
     main()

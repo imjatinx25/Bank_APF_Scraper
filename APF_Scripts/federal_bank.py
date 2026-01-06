@@ -159,6 +159,8 @@ def data_processing():
         print(f"Data uploaded to S3: {s3_key}")
     except Exception as e:
         print(f"Error: {str(e)}")
+    finally:
+        CSV_PATH.unlink()
 
 
 # process and upload

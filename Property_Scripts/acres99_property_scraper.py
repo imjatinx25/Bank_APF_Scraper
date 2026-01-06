@@ -780,8 +780,7 @@ def upload_csv_to_s3():
             print(f"[ERROR] S3_BUCKET_NAME not set in environment, skipping S3 upload")
             return
         
-        # key_prefix = os.getenv('S3_KEY')
-        key_prefix = "test_apf_apis/"
+        key_prefix = os.getenv('S3_KEY')
         
         with open(csv_path, 'rb') as f:
             csv_content = f.read()
