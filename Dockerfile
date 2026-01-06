@@ -55,9 +55,11 @@ RUN pip install -r requirements.txt
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
-# Copy application files
-COPY *.py .
+# Copy application files and scraper directories
+COPY app.py .
 COPY .env .
+COPY APF_Scripts/ ./APF_Scripts/
+COPY Property_Scripts/ ./Property_Scripts/
 
 # Create output directory
 RUN mkdir -p output
