@@ -56,9 +56,15 @@ CITIES_TO_SEARCH = [
 # Maximum number of pages to scrape per city (set to None for unlimited)
 MAX_PAGES_PER_CITY = None  # Set to a number like 8 to limit, or None for all pages
 
+# Global variable for browser
+driver = None
+
+# In-memory dedupe across the whole run
+SEEN_KEYS = set()
+
 # Initialize Chrome driver with anti-detection settings
-chrome_options = Options()
-chrome_options.add_argument('--headless')  # Uncomment to run in headless mode
+chrome_options = Options() 
+chrome_options.add_argument('--headless')
 chrome_options.add_argument('--no-sandbox')
 chrome_options.add_argument('--disable-dev-shm-usage')
 chrome_options.add_argument('--disable-blink-features=AutomationControlled')
@@ -67,10 +73,57 @@ chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64
 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 chrome_options.add_experimental_option('useAutomationExtension', False)
 
-driver = webdriver.Chrome(options=chrome_options)
+def start_new_browser():
+    """Start a fresh browser session"""
+    global driver
+    if driver:
+        try:
+            driver.quit()
+        except:
+            pass
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    # Hide webdriver property to avoid detection
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return driver
 
-# Hide webdriver property to avoid detection
-driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+def _make_property_key(row: dict) -> str:
+    """Create a unique key for deduplication"""
+    url = (row.get("property_url") or "").strip().lower()
+    if url:
+        return f"url::{url}"
+    name = (row.get("project_name") or "").strip().lower()
+    loc = (row.get("location") or "").strip().lower()
+    city = (row.get("city") or "").strip().lower()
+    return f"nlc::{name}::{loc}::{city}"
+
+def load_seen_keys(filename="output/99acres_properties.csv"):
+    """Load existing keys from CSV to avoid duplicates"""
+    if not os.path.exists(filename) or os.path.getsize(filename) == 0:
+        return
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                SEEN_KEYS.add(_make_property_key(row))
+    except:
+        pass
+
+def ensure_csv_header(filename="output/99acres_properties.csv"):
+    """Ensure CSV has a header"""
+    if os.path.exists(filename) and os.path.getsize(filename) > 0:
+        return
+    
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    fieldnames = [
+        'project_name', 'property_heading', 'property_type', 'city', 'location', 
+        'price', 'price_per_sqft', 'area', 'bhk_config', 'possession_status', 
+        'rera_status', 'property_tag', 'highlights', 'description', 
+        'property_url', 'card_type', 'scraped_at', 'source'
+    ]
+    with open(filename, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
 
 
 def close_popup_if_exists():
@@ -391,6 +444,33 @@ def extract_regular_card(card):
     return property_data
 
 
+def append_to_csv(properties, filename="output/99acres_properties.csv"):
+    """Append properties to CSV file with deduplication"""
+    if not properties:
+        return 0
+    
+    ensure_csv_header(filename)
+    
+    saved_count = 0
+    fieldnames = [
+        'project_name', 'property_heading', 'property_type', 'city', 'location', 
+        'price', 'price_per_sqft', 'area', 'bhk_config', 'possession_status', 
+        'rera_status', 'property_tag', 'highlights', 'description', 
+        'property_url', 'card_type', 'scraped_at', 'source'
+    ]
+    
+    with open(filename, 'a', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        for prop in properties:
+            key = _make_property_key(prop)
+            if key not in SEEN_KEYS:
+                writer.writerow(prop)
+                SEEN_KEYS.add(key)
+                saved_count += 1
+                
+    return saved_count
+
+
 def extract_project_card(card):
     """Extract data from new project card (PseudoTupleRevamp__tupleWrapProject)"""
     property_data = {}
@@ -664,58 +744,55 @@ def scrape_city_properties(city_name):
     """Scrape all properties for a specific city"""
     all_properties = []
     
-    # Search for the city
-    if not search_city(city_name):
-        return all_properties
+    # Start fresh browser per city to prevent memory leaks
+    start_new_browser()
     
-    # Scrape multiple pages
-    page_num = 1
-    while True:
-        # Check if we've reached the page limit (if set)
-        if MAX_PAGES_PER_CITY is not None and page_num > MAX_PAGES_PER_CITY:
-            print(f"\n  [INFO] Reached MAX_PAGES_PER_CITY ({MAX_PAGES_PER_CITY}), stopping")
-            break
+    try:
+        # Search for the city
+        if not search_city(city_name):
+            return all_properties
         
-        print(f"\n  Page {page_num}:")
+        # Scrape multiple pages
+        page_num = 1
+        ensure_csv_header()
         
-        # Extract properties from current page
-        properties = extract_property_cards()
-        
-        # Add city name to each property
-        for prop in properties:
-            prop['city'] = city_name.lower()
-        
-        all_properties.extend(properties)
-        
-        # Save to CSV after each page
-        if properties:
-            # Read existing data
-            existing_properties = []
-            try:
-                with open("output/99acres_properties.csv", 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    existing_properties = list(reader)
-            except FileNotFoundError:
-                pass  # File doesn't exist yet
+        while True:
+            # Check if we've reached the page limit (if set)
+            if MAX_PAGES_PER_CITY is not None and page_num > MAX_PAGES_PER_CITY:
+                print(f"\n  [INFO] Reached MAX_PAGES_PER_CITY ({MAX_PAGES_PER_CITY}), stopping")
+                break
             
-            # Append new properties
-            existing_properties.extend(properties)
+            print(f"\n  Page {page_num}:")
             
-            # Save all data
-            save_to_csv(existing_properties, "output/99acres_properties.csv")
-            print(f"  [SAVED] Saved {len(properties)} properties from this page (Total: {len(existing_properties)})")
-        
-        # Increment page counter
-        page_num += 1
-        
-        # Try to go to next page
-        if not check_and_go_to_next_page():
-            print(f"\n  [INFO] No more pages available, stopping")
-            break
-        
-        time.sleep(2)  # Delay between pages
+            # Extract properties from current page
+            properties = extract_property_cards()
+            
+            # Add city name to each property
+            for prop in properties:
+                prop['city'] = city_name.lower()
+            
+            # Append to CSV immediately (streaming)
+            saved = append_to_csv(properties)
+            if saved > 0:
+                print(f"  [SAVED] Appended {saved} new properties from this page.")
+            
+            all_properties.extend(properties)
+            
+            # Increment page counter
+            page_num += 1
+            
+            # Try to go to next page
+            if not check_and_go_to_next_page():
+                print(f"\n  [INFO] No more pages available, stopping")
+                break
+            
+            time.sleep(2)  # Delay between pages
+            
+    finally:
+        # Close browser after each city
+        if driver:
+            driver.quit()
     
-    print(f"\n  [OK] Total properties found in {city_name}: {len(all_properties)}")
     return all_properties
 
 
@@ -813,11 +890,14 @@ def main():
     print("="*60)
     
     try:
+        # Load existing keys from CSV once at startup
+        load_seen_keys()
+        ensure_csv_header()
+
         for city in CITIES_TO_SEARCH:
             properties = scrape_city_properties(city)
-            all_properties.extend(properties)
-            
-            print(f"\n  [PROGRESS] {len(properties)} properties from {city} (Total: {len(all_properties)})")
+            # We don't need to keep all_properties in memory since we stream to CSV
+            # properties_len = len(properties) 
             
             # Upload CSV to S3 after each city completes
             print(f"\n  [INFO] Uploading CSV to S3 after completing {city}...")
@@ -827,24 +907,22 @@ def main():
         
         print("\n" + "="*60)
         print(f"[COMPLETED] SCRAPING COMPLETED!")
-        print(f"Total properties scraped: {len(all_properties)}")
-        print(f"Saved to: output/99acres_properties.csv")
+        print(f"Final data saved to: output/99acres_properties.csv")
         print("="*60)
         
         upload_csv_to_s3()
         
     except KeyboardInterrupt:
         print("\n\n[WARNING] Scraping interrupted by user")
-        print(f"Data already saved per page. {len(all_properties)} properties were collected.")
         upload_csv_to_s3()
     
     except Exception as e:
         print(f"\n[ERROR] Error in main execution: {e}")
-        print(f"Data already saved per page. {len(all_properties)} properties were collected.")
         upload_csv_to_s3()
     
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
         print("\n[INFO] Browser closed")
 
 
