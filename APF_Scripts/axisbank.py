@@ -188,6 +188,7 @@ def scrape_axis_apf():
                         table = driver.find_element(By.ID, "gvApprovedList")
                         rows = table.find_elements(By.TAG_NAME, "tr")
 
+                        page_data = []
                         for i, row in enumerate(rows[1:], start=1):
                             cols = row.find_elements(By.TAG_NAME, "td")
                             if is_valid_data_row(cols):
@@ -198,24 +199,24 @@ def scrape_axis_apf():
                                     "Builder Name": cols[3].text.strip()
                                 }
                                 print("[DATA]", data)
-                                city_data_rows.append(data)
+                                page_data.append(data)
                             else:
                                 print(f"[DEBUG] Skipped row {i + 1}: not a valid data row")
+
+                        # Immediate Save: Append current page data to CSV to prevent data loss on failure
+                        if page_data:
+                            df_page = pd.DataFrame(page_data)
+                            OUT_DIR = Path("output"); OUT_DIR.mkdir(exist_ok=True)
+                            CSV_PATH = OUT_DIR / "axis_apf_projects.csv"
+                            write_header = not CSV_PATH.exists()
+                            df_page.to_csv(CSV_PATH, index=False, mode='a', header=write_header)
+                            data_rows.extend(page_data)
 
                         # Pagination advance (supports '...')
                         if go_to_next_unvisited_page(driver, visited_pages):
                             continue
                         print("[DEBUG] No more pages to visit.")
                         break
-
-                    # Only append to CSV after full city scrape
-                    if city_data_rows:
-                        df = pd.DataFrame(city_data_rows)
-                        OUT_DIR = Path("output"); OUT_DIR.mkdir(exist_ok=True)
-                        CSV_PATH = OUT_DIR / "axis_apf_projects.csv"
-                        write_header = not CSV_PATH.exists()
-                        df.to_csv(CSV_PATH, index=False, mode='a', header=write_header)
-                        data_rows.extend(city_data_rows)
 
                     success = True
                 except StaleElementReferenceException:
@@ -239,8 +240,18 @@ def data_processing():
     try:
         OUT_DIR = Path("output"); OUT_DIR.mkdir(exist_ok=True)
         CSV_PATH = OUT_DIR / "axis_apf_projects.csv"
-        columns = ['city', 'projectCode', 'projectName', 'builderName']
-        df = pd.read_csv(CSV_PATH, names=columns, header=None)
+        
+        # Read with header and rename for internal consistency
+        df = pd.read_csv(CSV_PATH)
+        df.rename(columns={
+            'City': 'city',
+            'Project Code': 'projectCode',
+            'Project Name': 'projectName',
+            'Builder Name': 'builderName'
+        }, inplace=True)
+
+        # Remove duplicates (important since retries might re-save pages)
+        df.drop_duplicates(inplace=True)
 
         # drop project code column
         df = df.drop(columns=['projectCode'])
